@@ -4,3 +4,4 @@ local.settings.json
 .env
 *.js.map
 .funcignore
+docs/

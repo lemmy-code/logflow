@@ -11,7 +11,7 @@ var accountName = '${projectName}-${environment}-cosmos'
 var databaseName = 'logflow'
 var containerName = 'logs'
 
-resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-02-15-preview' = {
+resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2023-04-15' = {
   name: accountName
   location: location
   kind: 'GlobalDocumentDB'
@@ -24,55 +24,21 @@ resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-02-15-preview
       {
         locationName: location
         failoverPriority: 0
-        isZoneRedundant: environment == 'prod'
+        isZoneRedundant: false
       }
     ]
-    capabilities: environment == 'prod' ? [] : [
+    capabilities: [
       { name: 'EnableServerless' }
     ]
   }
 }
 
-resource database 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases@2024-02-15-preview' = {
+resource database 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases@2023-04-15' = {
   parent: cosmosAccount
   name: databaseName
   properties: {
     resource: {
       id: databaseName
-    }
-  }
-}
-
-resource container 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/sqlContainers@2024-02-15-preview' = {
-  parent: database
-  name: containerName
-  properties: {
-    resource: {
-      id: containerName
-      partitionKey: {
-        paths: ['/appId']
-        kind: 'Hash'
-      }
-      indexingPolicy: {
-        indexingMode: 'consistent'
-        includedPaths: [
-          { path: '/appId/?' }
-          { path: '/level/?' }
-          { path: '/receivedAt/?' }
-        ]
-        excludedPaths: [
-          { path: '/metadata/*' }
-          { path: '/message/?' }
-          { path: '/_etag/?' }
-        ]
-        compositeIndexes: [
-          [
-            { path: '/appId', order: 'ascending' }
-            { path: '/receivedAt', order: 'descending' }
-          ]
-        ]
-      }
-      defaultTtl: 2592000
     }
   }
 }

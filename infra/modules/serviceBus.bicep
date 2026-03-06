@@ -7,7 +7,7 @@ param location string = resourceGroup().location
 @description('Project name')
 param projectName string = 'logflow'
 
-var namespaceName = '${projectName}-${environment}-sb'
+var namespaceName = '${projectName}-${environment}-sbus'
 var queueName = 'logflow-ingest'
 
 resource serviceBusNamespace 'Microsoft.ServiceBus/namespaces@2022-10-01-preview' = {
