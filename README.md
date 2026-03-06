@@ -6,67 +6,7 @@ Serverless log aggregation pipeline built on Azure -- ingest, process, query, an
 
 ## Architecture
 
-```
-                         +--------------------------+
-                         |        Client App        |
-                         +------------+-------------+
-                                      |
-                                POST /api/logs
-                                      |
-                    +-----------------v------------------+
-                    |     Ingest Function (HTTP)         |
-                    |                                    |
-                    |  Middleware Pipeline:               |
-                    |    correlationId -> apiKey auth     |
-                    |    -> rate limiter -> handler       |
-                    |                                    |
-                    |  Zod validation -> enrich payload  |
-                    |  -> publish to Service Bus         |
-                    |  -> 202 Accepted                   |
-                    +-----------------+------------------+
-                                      |
-                                  publish
-                                      |
-                    +-----------------v------------------+
-                    |        Azure Service Bus           |
-                    |                                    |
-                    |  queue: logflow-ingest              |
-                    |  maxDeliveryCount: 3                |
-                    |  DLQ on failure                     |
-                    +-----------------+------------------+
-                                      |
-                                  trigger
-                                      |
-                    +-----------------v------------------+
-                    |   Processor Function (SB Trigger)  |
-                    |                                    |
-                    |  Normalize level, add metadata     |
-                    |  (processedAt, region, TTL)        |
-                    |  -> write to CosmosDB              |
-                    +-----------------+------------------+
-                                      |
-                                   write
-                                      |
-                    +-----------------v------------------+
-                    |          Azure CosmosDB            |
-                    |                                    |
-                    |  database: logflow                  |
-                    |  container: logs                    |
-                    |  partition key: /appId              |
-                    |  TTL: 30 days                       |
-                    +-----------------+------------------+
-                                      |
-                                   read
-                                      |
-                    +-----------------v------------------+
-                    |    Query Functions (HTTP)           |
-                    |                                    |
-                    |  GET /api/logs         (filtered)   |
-                    |  GET /api/logs/:id     (by id)      |
-                    |  GET /api/apps/:appId/stats         |
-                    |  GET /api/health                    |
-                    +------------------------------------+
-```
+Applications send logs via HTTP to the ingest endpoint, which validates and publishes them to an Azure Service Bus queue. A processor function picks up messages from the queue, normalizes them, and writes to CosmosDB. A separate query API reads from CosmosDB with filtering, pagination, and aggregation. All HTTP endpoints pass through a middleware pipeline that handles authentication, rate limiting, correlation IDs, and error handling.
 
 ---
 
@@ -539,52 +479,66 @@ func azure functionapp publish logflow-prod-func
 
 ```
 logflow/
-├── .github/
-│   └── workflows/
-│       └── deploy.yml              # CI/CD pipeline
-│
+├── .github/workflows/deploy.yml
 ├── infra/
-│   ├── main.bicep                  # Orchestrator — wires all modules
+│   ├── main.bicep
 │   └── modules/
-│       ├── storage.bicep           # Storage Account
-│       ├── appInsights.bicep       # Application Insights + Log Analytics
-│       ├── serviceBus.bicep        # Service Bus Namespace + Queue
-│       ├── cosmosDb.bicep          # CosmosDB Account + Database + Container
-│       └── functionApp.bicep       # App Service Plan + Function App
-│
+│       ├── storage.bicep
+│       ├── appInsights.bicep
+│       ├── serviceBus.bicep
+│       ├── cosmosDb.bicep
+│       └── functionApp.bicep
 ├── src/
 │   ├── functions/
-│   │   ├── ingest.ts               # POST /api/logs — async log ingestion
-│   │   ├── processor.ts            # Service Bus trigger — process + store
-│   │   ├── query.ts                # GET endpoints — query + stats
-│   │   └── health.ts               # GET /api/health — dependency checks
-│   │
+│   │   ├── ingest.ts
+│   │   ├── processor.ts
+│   │   ├── query.ts
+│   │   └── health.ts
 │   ├── middleware/
-│   │   ├── pipeline.ts             # Composable middleware chain
-│   │   ├── apiKey.ts               # Bearer token auth (timing-safe)
-│   │   ├── rateLimiter.ts          # Token bucket rate limiting
-│   │   ├── correlationId.ts        # Request tracing via X-Request-Id
-│   │   └── errorHandler.ts         # Centralized error-to-HTTP mapping
-│   │
+│   │   ├── pipeline.ts
+│   │   ├── apiKey.ts
+│   │   ├── rateLimiter.ts
+│   │   ├── correlationId.ts
+│   │   └── errorHandler.ts
 │   ├── lib/
-│   │   ├── cosmosdb.ts             # CosmosDB client + CRUD operations
-│   │   └── servicebus.ts           # Service Bus sender + health check
-│   │
+│   │   ├── cosmosdb.ts
+│   │   └── servicebus.ts
 │   ├── schemas/
-│   │   └── log.schema.ts           # Zod schemas (payload + query params)
-│   │
+│   │   └── log.schema.ts
 │   ├── errors/
-│   │   └── index.ts                # Custom error hierarchy
-│   │
+│   │   └── index.ts
 │   └── types/
-│       └── index.ts                # TypeScript interfaces
-│
-├── docker-compose.yml              # Azurite for local dev
-├── host.json                       # Azure Functions runtime config
-├── local.settings.json.example     # Template for local settings
+│       └── index.ts
+├── scripts/
+│   └── demo.sh
+├── docker-compose.yml
+├── host.json
+├── local.settings.json.example
 ├── package.json
 ├── tsconfig.json
 └── .eslintrc.json
+```
+
+---
+
+## Demo
+
+A demo script simulates 3 microservices (payment-service, auth-service, order-service) sending realistic logs:
+
+```bash
+bash scripts/demo.sh
+```
+
+After running, query the results:
+
+```bash
+# Stats per service
+curl "https://logflow-prod-func.azurewebsites.net/api/apps/payment-service/stats" \
+  -H "Authorization: Bearer your-api-key"
+
+# All errors from auth-service
+curl "https://logflow-prod-func.azurewebsites.net/api/logs?appId=auth-service&level=error" \
+  -H "Authorization: Bearer your-api-key"
 ```
 
 ---
